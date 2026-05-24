@@ -6,7 +6,7 @@
 GYM_NAME = "ModernXBoxing"
 GYM_LOCATION = "Hanoi, Vietnam"
 GYM_PHONE = "+84 91 387 98 65"
-GYM_ADDRESS = ""  # Add: e.g. "123 Street Name, District, Hanoi"
+GYM_ADDRESS = "145 Nam Đồng, Tầng 2, Quận Đống Đa, Hanoi, Vietnam 100000"
 GYM_EMAIL = "modernxboxing@gmail.com"
 GYM_FACEBOOK = "https://www.facebook.com/p/Modern-X-Boxing-61569188446152/"
 GYM_INSTAGRAM = ""  # Add your Instagram handle when ready
