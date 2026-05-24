@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from database import Database
 from ai_handler import AIHandler
+from gym_info import find_faq_answer, get_gym_context, SCHEDULE, PRICING, GYM_NAME
 
 logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -15,22 +16,58 @@ def is_owner(update): return str(update.effective_chat.id) == OWNER_CHAT_ID
 
 async def notify_owner(context, msg):
     if OWNER_CHAT_ID:
-        await context.bot.send_message(chat_id=int(OWNER_CHAT_ID), text=msg, parse_mode='Markdown')
+        await context.bot.send_message(chat_id=int(OWNER_CHAT_ID), text=msg)
 
 async def cmd_start(update, context):
     await update.message.reply_text(
         "HanoiBox Admin Bot\n\n"
+        "MEMBER COMMANDS\n"
         "check in [name] - check in a member\n"
         "new member - add a new member\n"
         "log payment - record a payment\n"
         "members - list active members\n"
         "expiring - expiry alerts\n"
         "summary - today's summary\n\n"
+        "GYM INFO\n"
+        "/info - gym info, schedule, pricing\n"
+        "/schedule - class timetable\n"
+        "/prices - membership pricing\n"
+        "/faq - common questions\n\n"
         "Send a photo of a receipt or ID card and I will read it.\n"
         "Type /myid to get your Telegram chat ID.")
 
 async def cmd_myid(update, context):
     await update.message.reply_text(f"Your Chat ID: {update.effective_chat.id}")
+
+async def cmd_info(update, context):
+    from gym_info import GYM_ADDRESS, GYM_PHONE, GYM_FACEBOOK
+    msg = (f"{GYM_NAME} - Gym Info\n\n"
+           f"Address: {GYM_ADDRESS or 'Ask admin to update in gym_info.py'}\n"
+           f"Phone: {GYM_PHONE or 'Ask admin to update'}\n"
+           f"Facebook: {GYM_FACEBOOK or 'Ask admin to update'}\n\n"
+           f"CLASS SCHEDULE\n{SCHEDULE.strip()}\n\n"
+           f"PRICING\n{PRICING.strip()}\n\n"
+           "Type /faq for more or ask me anything!")
+    await update.message.reply_text(msg)
+
+async def cmd_schedule(update, context):
+    await update.message.reply_text("Class Schedule:\n" + SCHEDULE.strip())
+
+async def cmd_prices(update, context):
+    await update.message.reply_text("Membership Pricing:\n" + PRICING.strip())
+
+async def cmd_faq(update, context):
+    await update.message.reply_text(
+        "Common Questions - just type:\n\n"
+        "location / address / parking\n"
+        "schedule / classes / timetable\n"
+        "price / cost / membership / fee\n"
+        "gear / equipment\n"
+        "beginner / first time\n"
+        "trial\n"
+        "coach / trainer\n"
+        "kids / women\n\n"
+        "Or ask in plain English - e.g. 'how much does it cost?' or 'when are the morning classes?'")
 
 async def cmd_summary(update, context):
     ctx = db.get_context(); att = db.get_today_attendance(); rev = db.get_monthly_revenue(); exp = db.get_expiring_members(7)
@@ -54,7 +91,7 @@ async def handle_checkin(update, context, text):
     msg = f"Checked in: {m['name']} at {datetime.now().strftime('%I:%M %p')}"
     if m.get('expiry_date'):
         days = (date.fromisoformat(m['expiry_date']) - date.today()).days
-        if days < 0: msg += f" - EXPIRED {abs(days)} days ago"
+        if days < 0: msg += f" - EXPIRED {abs(days)} days ago - needs renewal!"
         elif days <= 7: msg += f" - Expires in {days} days"
     await update.message.reply_text(msg)
 
@@ -90,8 +127,7 @@ async def handle_new_member_prompt(update, context):
 
 async def handle_payment_prompt(update, context):
     context.user_data['flow'] = 'payment'
-    await update.message.reply_text(
-        "Log Payment\nFormat: [Name] [Amount VND] [cash/transfer]\nExample: James 3600000 cash\n\nOr send a receipt photo.")
+    await update.message.reply_text("Log Payment\nFormat: [Name] [Amount VND] [cash/transfer]\nExample: James 3600000 cash\n\nOr send a receipt photo.")
 
 async def handle_payment_text(update, context, text):
     parts = text.strip().split(); amount = None; name_parts = []; method = 'cash'
@@ -157,6 +193,7 @@ async def handle_message(update, context):
     text = update.message.text or ''; lower = text.lower().strip()
     sender = update.effective_user.first_name or 'Admin'; flow = context.user_data.get('flow','')
     db.log_message(sender, text[:200])
+
     if flow == 'new_member_name':
         context.user_data['new_member']['name'] = text.strip().title()
         context.user_data['flow'] = 'new_member_phone'
@@ -171,6 +208,8 @@ async def handle_message(update, context):
         await notify_owner(context, f"New member: {nm['name']} - {plans.get(plan,plan)} added by {sender}"); return
     if flow == 'payment':
         context.user_data['flow'] = ''; await handle_payment_text(update, context, text); return
+
+    # Admin commands
     if any(x in lower for x in ['check in','checkin','check-in']): await handle_checkin(update, context, lower)
     elif any(x in lower for x in ['new member','add member']): await handle_new_member_prompt(update, context)
     elif any(x in lower for x in ['log payment','payment','paid']): await handle_payment_prompt(update, context)
@@ -178,7 +217,17 @@ async def handle_message(update, context):
     elif any(x in lower for x in ['expiring','expire']): await handle_expiring(update, context)
     elif any(x in lower for x in ['summary','report','today']): await cmd_summary(update, context)
     else:
-        r = ai.interpret_message(text, db.get_context()); await update.message.reply_text(r)
+        # Try FAQ keyword match first (fast, no API call)
+        faq_answer = find_faq_answer(lower)
+        if faq_answer:
+            await update.message.reply_text(faq_answer)
+        else:
+            # Fall back to AI with gym context
+            gym_ctx = get_gym_context()
+            db_ctx = db.get_context()
+            combined = {**db_ctx, **gym_ctx}
+            r = ai.interpret_message(text, combined)
+            await update.message.reply_text(r)
 
 def build_app():
     from database import init_db; init_db()
@@ -186,6 +235,10 @@ def build_app():
     app.add_handler(CommandHandler('start', cmd_start))
     app.add_handler(CommandHandler('myid', cmd_myid))
     app.add_handler(CommandHandler('summary', cmd_summary))
+    app.add_handler(CommandHandler('info', cmd_info))
+    app.add_handler(CommandHandler('faq', cmd_faq))
+    app.add_handler(CommandHandler('schedule', cmd_schedule))
+    app.add_handler(CommandHandler('prices', cmd_prices))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
