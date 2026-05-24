@@ -34,7 +34,8 @@ async def cmd_start(update, context):
         "/prices - membership pricing\n"
         "/faq - common questions\n\n"
         "Send a photo of a receipt or ID card and I will read it.\n"
-        "Type /myid to get your Telegram chat ID.")
+        "Type /myid to get your Telegram chat ID.\n"
+        "Type /test to run a full system check.")
 
 async def cmd_myid(update, context):
     await update.message.reply_text(f"Your Chat ID: {update.effective_chat.id}")
@@ -68,6 +69,43 @@ async def cmd_faq(update, context):
         "coach / trainer\n"
         "kids / women\n\n"
         "Or ask in plain English - e.g. 'how much does it cost?' or 'when are the morning classes?'")
+
+async def cmd_test(update, context):
+    from gym_info import GYM_NAME, GYM_ADDRESS, GYM_PHONE, GYM_EMAIL, GYM_FACEBOOK, find_faq_answer
+    lines = ["\U0001f94a BOT TEST REPORT\n"]
+
+    lines.append("── GYM INFO ──")
+    lines.append(f"Name: {GYM_NAME or '❌ missing'}")
+    lines.append(f"Address: {GYM_ADDRESS or '❌ missing'}")
+    lines.append(f"Phone: {GYM_PHONE or '❌ missing'}")
+    lines.append(f"Email: {GYM_EMAIL or '❌ missing'}")
+    lines.append(f"Facebook: {GYM_FACEBOOK or '❌ missing'}")
+
+    lines.append("\n── ADMIN ──")
+    lines.append(f"Owner ID set: {'✅ ' + OWNER_CHAT_ID if OWNER_CHAT_ID else '❌ not set'}")
+    lines.append(f"Your ID: {update.effective_chat.id}")
+    lines.append(f"Is owner: {'✅ yes' if is_owner(update) else '❌ no'}")
+
+    lines.append("\n── MEMBERS ──")
+    try:
+        members = db.get_active_members()
+        att = db.get_today_attendance()
+        exp = db.get_expiring_members(7)
+        rev = db.get_monthly_revenue()
+        lines.append(f"Active members: {len(members)}")
+        lines.append(f"Check-ins today: {len(att)}")
+        lines.append(f"Expiring in 7 days: {len(exp)}")
+        lines.append(f"Monthly revenue: ${round((rev.get('total_usd') or 0), 2)}")
+    except Exception as e:
+        lines.append(f"DB error: {e}")
+
+    lines.append("\n── FAQ ──")
+    lines.append(f"Location FAQ: {'✅' if find_faq_answer('location') else '❌'}")
+    lines.append(f"Price FAQ: {'✅' if find_faq_answer('price') else '❌'}")
+    lines.append(f"Schedule FAQ: {'✅' if find_faq_answer('schedule') else '❌'}")
+
+    lines.append("\n✅ Test complete")
+    await update.message.reply_text("\n".join(lines))
 
 async def cmd_summary(update, context):
     ctx = db.get_context(); att = db.get_today_attendance(); rev = db.get_monthly_revenue(); exp = db.get_expiring_members(7)
@@ -209,7 +247,6 @@ async def handle_message(update, context):
     if flow == 'payment':
         context.user_data['flow'] = ''; await handle_payment_text(update, context, text); return
 
-    # Admin commands
     if any(x in lower for x in ['check in','checkin','check-in']): await handle_checkin(update, context, lower)
     elif any(x in lower for x in ['new member','add member']): await handle_new_member_prompt(update, context)
     elif any(x in lower for x in ['log payment','payment','paid']): await handle_payment_prompt(update, context)
@@ -217,12 +254,10 @@ async def handle_message(update, context):
     elif any(x in lower for x in ['expiring','expire']): await handle_expiring(update, context)
     elif any(x in lower for x in ['summary','report','today']): await cmd_summary(update, context)
     else:
-        # Try FAQ keyword match first (fast, no API call)
         faq_answer = find_faq_answer(lower)
         if faq_answer:
             await update.message.reply_text(faq_answer)
         else:
-            # Fall back to AI with gym context
             gym_ctx = get_gym_context()
             db_ctx = db.get_context()
             combined = {**db_ctx, **gym_ctx}
@@ -239,6 +274,7 @@ def build_app():
     app.add_handler(CommandHandler('faq', cmd_faq))
     app.add_handler(CommandHandler('schedule', cmd_schedule))
     app.add_handler(CommandHandler('prices', cmd_prices))
+    app.add_handler(CommandHandler('test', cmd_test))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
