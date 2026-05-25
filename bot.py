@@ -1,6 +1,6 @@
 import os, logging
 from datetime import datetime, date
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from database import Database
 from ai_handler import AIHandler
@@ -264,9 +264,21 @@ async def handle_message(update, context):
             r = ai.interpret_message(text, combined)
             await update.message.reply_text(r)
 
+async def post_init(application):
+    await application.bot.set_my_commands([
+        BotCommand('start',    'Show help & all commands'),
+        BotCommand('test',     'System check - test everything'),
+        BotCommand('info',     'Gym info, address & schedule'),
+        BotCommand('schedule', 'Class timetable'),
+        BotCommand('prices',   'Membership pricing'),
+        BotCommand('faq',      'Common questions'),
+        BotCommand('summary',  "Today's report"),
+        BotCommand('myid',     'Your Telegram chat ID'),
+    ])
+
 def build_app():
     from database import init_db; init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler('start', cmd_start))
     app.add_handler(CommandHandler('myid', cmd_myid))
     app.add_handler(CommandHandler('summary', cmd_summary))
